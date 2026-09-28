@@ -26,7 +26,7 @@ Projeto de Iniciação Científica para análise espectral de soluções com dif
 
 ## Visão geral
 
-O sistema utiliza o sensor espectral AS7341 (ams OSRAM) para medir a resposta espectral de amostras de soluções com diferentes valores de pH. O sensor é posicionado sobre a matriz de LEDs 5×5 (WS2812B) da placa BitDogLab v7, que funciona como fonte de luz controlada. A comunicação entre o microcontrolador RP2040 (Raspberry Pi Pico) e o sensor é feita via protocolo I2C, enquanto a matriz de LEDs é controlada via PIO (Programmable I/O).
+O sistema utiliza o sensor espectral AS7341 (ams OSRAM) para medir a resposta espectral de amostras de soluções com diferentes valores de pH. O sensor é posicionado sobre a matriz de LEDs 5×5 (WS2812B) da placa BitDogLab v7, que funciona como fonte de luz controlada. A comunicação entre o microcontrolador RP2350 (Raspberry Pi Pico 2 W) e o sensor é feita via protocolo I2C, enquanto a matriz de LEDs é controlada via PIO (Programmable I/O).
 
 O fluxo de operação é:
 
@@ -41,7 +41,7 @@ O fluxo de operação é:
 
 | Componente | Descrição |
 |---|---|
-| **BitDogLab v7** | Placa educacional baseada no Raspberry Pi Pico (RP2040) |
+| **BitDogLab v7** | Placa educacional baseada no Raspberry Pi Pico 2 W (RP2350) |
 | **AS7341** | Sensor espectral de 11 canais (ams OSRAM), I2C, endereço 0x39 |
 | **Matriz WS2812B** | Matriz 5×5 de LEDs RGB endereçáveis (integrada à BitDogLab) |
 | **Botões A e B** | Botões da placa BitDogLab (ativos em LOW com pull-up interno) |
@@ -144,13 +144,13 @@ Contém toda a lógica de aplicação que integra o sensor, os LEDs e a interfac
 
 ### `ws2812.pio` — Programa PIO para LEDs WS2812
 
-Programa assembly para o periférico PIO do RP2040 que implementa o protocolo de temporização dos LEDs WS2812B a 800 kHz. Opera via side-set para gerar os pulsos de dados com temporização T1=3, T2=3, T3=4 ciclos. O arquivo é processado pelo `pioasm` durante a compilação para gerar o header `ws2812.pio.h`.
+Programa assembly para o periférico PIO do RP2350 que implementa o protocolo de temporização dos LEDs WS2812B a 800 kHz. Opera via side-set para gerar os pulsos de dados com temporização T1=3, T2=3, T3=4 ciclos. O arquivo é processado pelo `pioasm` durante a compilação para gerar o header `ws2812.pio.h`.
 
 ### `captura_dados.py` — Script de captura serial
 
 Script Python que roda no computador e captura os dados transmitidos pela Pico via USB serial:
 
-- **Detecção automática de porta**: identifica a porta serial da Pico pelo VID/PID do RP2040 (0x2E8A).
+- **Detecção automática de porta**: identifica a porta serial da Pico.
 - **Captura seletiva**: filtra linhas que começam com `CSV,` e extrai os 16 campos de dados.
 - **Entrada por tecla única**: utiliza `msvcrt.kbhit()` e `msvcrt.getch()` (Windows) para capturar comandos de teclado instantaneamente, sem necessidade de pressionar Enter.
 - **Saída**: arquivo CSV com timestamp no nome (`medicoes_ph_YYYYMMDD_HHMMSS.csv`).
