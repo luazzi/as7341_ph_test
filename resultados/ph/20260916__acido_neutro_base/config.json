@@ -1,0 +1,6 @@
+{
+  "migrado": true,
+  "experimento": "ph",
+  "firmware": "a734x_test",
+  "obs": "migrado de data/ph e da raiz do projeto"
+}

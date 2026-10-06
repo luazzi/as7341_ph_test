@@ -42,6 +42,11 @@
 #define MATRIX_WIDTH    5
 #define MATRIX_HEIGHT   5
 
+// Varredura automatica. Cada leitura usa dois ciclos SMUX do AS7341.
+#define LEITURAS_POR_COR       5
+#define TEMPO_ESTABILIZACAO_MS 500
+#define INTERVALO_LEITURAS_MS  500
+
 // Buffer de cores da matriz (formato GRB para WS2812)
 static uint32_t led_buffer[NUM_LEDS];
 
@@ -51,6 +56,16 @@ static uint ws_sm;
 
 // Instância do sensor AS7341
 static as7341_t sensor;
+
+// ===== Iluminação =====
+#define LED_SENSOR_MIN_MA     4
+#define LED_SENSOR_MAX_MA    50
+#define LED_SENSOR_PASSO_MA   2
+#define LED_SENSOR_INICIAL_MA 10
+
+static bool     matriz_ligada = true;
+static bool     led_sensor_on = false;
+static uint16_t led_sensor_ma = LED_SENSOR_INICIAL_MA;
 
 // ============================================================================
 // Mapeamento da matriz serpentina (BitDogLab v7)
@@ -85,16 +100,14 @@ typedef struct {
 } cor_t;
 
 static const cor_t paleta[] = {
-    { 255,   0,   0, "Vermelho"  },
-    {   0, 255,   0, "Verde"     },
-    {   0,   0, 255, "Azul"      },
-    { 255, 255,   0, "Amarelo"   },
-    { 255,   0, 255, "Magenta"   },
-    {   0, 255, 255, "Ciano"     },
-    { 255, 255, 255, "Branco"    },
-    { 255, 128,   0, "Laranja"   },
     { 128,   0, 255, "Violeta"   },
-    { 255,  64, 128, "Rosa"      },
+    {  75,   0, 130, "Indigo"    },
+    {   0,   0, 255, "Azul"      },
+    {   0, 255, 255, "Ciano"     },
+    {   0, 255,   0, "Verde"     },
+    { 255, 255,   0, "Amarelo"   },
+    { 255, 128,   0, "Laranja"   },
+    { 255,   0,   0, "Vermelho"  },
 };
 
 #define NUM_PALETA (sizeof(paleta) / sizeof(paleta[0]))
@@ -157,14 +170,44 @@ static void set_center_color(uint8_t r, uint8_t g, uint8_t b) {
     // Primeiro limpa tudo
     ws2812_clear();
 
-    // Define os 9 LEDs centrais
-    uint32_t color = rgb_to_grb(r, g, b);
-    for (int i = 0; i < 9; i++) {
-        led_buffer[center_leds[i]] = color;
+    if (matriz_ligada) {
+        // Define os 9 LEDs centrais se a matriz estiver ligada
+        uint32_t color = rgb_to_grb(r, g, b);
+        for (int i = 0; i < 9; i++) {
+            led_buffer[center_leds[i]] = color;
+        }
     }
 
     // Atualiza a matriz
     ws2812_update();
+}
+
+// ===== Controle do LED acoplado ao AS7341 =====
+
+static bool led_sensor_aplicar(void) {
+    if (!as7341_set_led_current(&sensor, led_sensor_ma)) return false;
+    return as7341_enable_led(&sensor, led_sensor_on);
+}
+
+static void led_sensor_definir_corrente(int corrente_ma) {
+    if (corrente_ma < LED_SENSOR_MIN_MA) corrente_ma = LED_SENSOR_MIN_MA;
+    if (corrente_ma > LED_SENSOR_MAX_MA) corrente_ma = LED_SENSOR_MAX_MA;
+    corrente_ma = LED_SENSOR_MIN_MA + ((corrente_ma - LED_SENSOR_MIN_MA) / 2) * 2;
+    led_sensor_ma = (uint16_t)corrente_ma;
+
+    if (led_sensor_aplicar()) {
+        printf("# LED AS7341: corrente = %u mA (%s)\n", led_sensor_ma,
+               led_sensor_on ? "ligado" : "desligado");
+    } else {
+        printf("# ERRO: falha ao configurar o LED do AS7341\n");
+    }
+}
+
+static void mostrar_status(void) {
+    printf("# STATUS: matriz=%s, led_as7341=%s, corrente=%u mA\n",
+           matriz_ligada ? "ligada" : "desligada",
+           led_sensor_on ? "ligado" : "desligado",
+           led_sensor_ma);
 }
 
 /**
@@ -204,6 +247,11 @@ static bool btn_pressed(uint gpio) {
 // Verificação de comandos via serial
 // ============================================================================
 
+// Declarações antecipadas
+static void realizar_leitura(void);
+static void executar_varredura(void);
+static int ler_numero_serial(void);
+
 static void verificar_serial(void) {
     int c = getchar_timeout_us(0);  // Non-blocking read
     if (c == PICO_ERROR_TIMEOUT) return;
@@ -224,22 +272,97 @@ static void verificar_serial(void) {
             ph_atual = PH_BASE;
             printf("[pH] Tipo alterado para: BASE\n");
             break;
+        case 'm':
+        case 'M':
+            // Liga / desliga matriz WS2812
+            matriz_ligada = !matriz_ligada;
+            set_center_color(paleta[cor_atual].r, paleta[cor_atual].g, paleta[cor_atual].b);
+            printf("# Matriz de LEDs: %s\n", matriz_ligada ? "LIGADA" : "DESLIGADA");
+            break;
+        case 'l':
+        case 'L':
+            // Liga / desliga LED do AS7341
+            led_sensor_on = !led_sensor_on;
+            if (led_sensor_aplicar()) {
+                printf("# LED AS7341: %s (%u mA)\n",
+                       led_sensor_on ? "LIGADO" : "DESLIGADO", led_sensor_ma);
+            } else {
+                printf("# ERRO: falha ao configurar o LED do AS7341\n");
+            }
+            break;
+        case '+':
+        case '=':
+            led_sensor_definir_corrente(led_sensor_ma + LED_SENSOR_PASSO_MA);
+            break;
+        case '-':
+        case '_':
+            led_sensor_definir_corrente(led_sensor_ma - LED_SENSOR_PASSO_MA);
+            break;
+        case 'i':
+        case 'I': {
+            printf("# Digite a corrente em mA (%u-%u) e Enter:\n",
+                   LED_SENSOR_MIN_MA, LED_SENSOR_MAX_MA);
+            int valor = ler_numero_serial();
+            if (valor < 0) {
+                printf("# Valor invalido, mantido em %u mA\n", led_sensor_ma);
+            } else {
+                led_sensor_definir_corrente(valor);
+            }
+            break;
+        }
+        case 's':
+        case 'S':
+            mostrar_status();
+            break;
+        case 'v':
+        case 'V':
+            // Dispara varredura automática completa
+            executar_varredura();
+            break;
+        case 'p':
+        case 'P':
+            // Dispara uma única medição
+            realizar_leitura();
+            break;
         case 'r':
         case 'R':
             medicao_num = 0;
             printf("[Reset] Contador de medicoes zerado.\n");
             break;
+        case '0': case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8': case '9':
+        {
+            // Seleciona cor diretamente pelo índice (0-9)
+            uint8_t idx = (uint8_t)(c - '0');
+            if (idx < NUM_PALETA) {
+                cor_atual = idx;
+                set_center_color(paleta[cor_atual].r,
+                                 paleta[cor_atual].g,
+                                 paleta[cor_atual].b);
+                printf("[Cor] %s (R=%d, G=%d, B=%d)\n",
+                       paleta[cor_atual].nome,
+                       paleta[cor_atual].r,
+                       paleta[cor_atual].g,
+                       paleta[cor_atual].b);
+            }
+            break;
+        }
         case 'h':
         case 'H':
         case '?':
             printf("\n--- Comandos ---\n");
-            printf("  a = Tipo Acido\n");
-            printf("  n = Tipo Neutro\n");
-            printf("  b = Tipo Base\n");
-            printf("  r = Reset contador\n");
-            printf("  h = Ajuda\n");
-            printf("  Tipo atual: %s | Medicao #%u\n\n",
-                   ph_nomes[ph_atual], medicao_num);
+            printf("  v = Iniciar varredura espectral automatica\n");
+            printf("  m = Liga/Desliga matriz de LEDs\n");
+            printf("  l = Liga/Desliga LED do sensor AS7341\n");
+            printf("  +/- = Ajusta corrente do LED do sensor (+/-%d mA)\n", LED_SENSOR_PASSO_MA);
+            printf("  i<mA> = Define corrente (ex.: i20 + Enter)\n");
+            printf("  s = Mostra status atual\n");
+            printf("  p = Disparar leitura pontual\n");
+            printf("  a/n/b = pH Acido / Neutro / Base\n");
+            printf("  0-7 = Selecionar cor da matriz\n");
+            printf("  r = Reset contador de medicoes\n");
+            printf("  h = Ajuda\n\n");
+            mostrar_status();
             break;
         default:
             break;
@@ -302,17 +425,67 @@ static void realizar_leitura(void) {
 }
 
 // ============================================================================
-// Main
+// Funções auxiliares de varredura e serial
 // ============================================================================
 
+static int ler_numero_serial(void) {
+    int valor = 0;
+    bool tem_digito = false;
+    while (true) {
+        int c = getchar_timeout_us(10000000); // 10 s timeout
+        if (c == PICO_ERROR_TIMEOUT) break;
+        if (c >= '0' && c <= '9') {
+            valor = valor * 10 + (c - '0');
+            tem_digito = true;
+            if (valor > 1000) valor = 1000;
+        } else if (c == '\r' || c == '\n') {
+            if (tem_digito) break;
+        } else if (c != ' ') {
+            break;
+        }
+    }
+    return tem_digito ? valor : -1;
+}
+
+static void executar_varredura(void) {
+    mostrar_status();
+    printf("CSV_HEADER,Num,Tipo_pH,LED_Cor,LED_R,LED_G,LED_B,F1_415nm,F2_445nm,F3_480nm,F4_515nm,F5_555nm,F6_590nm,F7_630nm,F8_680nm,Clear,NIR\n");
+
+    const uint32_t ciclo = 1;
+    printf("[Auto] Ciclo unico: %u leituras por cor, espacadas em %u ms.\n",
+           LEITURAS_POR_COR, INTERVALO_LEITURAS_MS);
+
+    for (uint8_t cor_id = 0; cor_id < NUM_PALETA; cor_id++) {
+        cor_atual = cor_id;
+        set_center_color(paleta[cor_atual].r,
+                         paleta[cor_atual].g,
+                         paleta[cor_atual].b);
+
+        sleep_ms(TEMPO_ESTABILIZACAO_MS);
+        printf("BATCH,%lu,%u,%s\n", (unsigned long)ciclo, cor_atual,
+               paleta[cor_atual].nome);
+
+        for (uint8_t amostra = 1; amostra <= LEITURAS_POR_COR; amostra++) {
+            realizar_leitura();
+            if (amostra < LEITURAS_POR_COR) {
+                sleep_ms(INTERVALO_LEITURAS_MS);
+            }
+        }
+    }
+
+    // Desliga matriz ao final da varredura
+    ws2812_clear();
+    ws2812_update();
+    printf("[Auto] Ciclo concluido. Dados disponiveis na serial.\n");
+}
+
 int main() {
-    // Inicializa stdio (USB serial)
     stdio_init_all();
     sleep_ms(2000);
 
     printf("========================================\n");
     printf("  AS7341 + Matriz WS2812 5x5\n");
-    printf("  BitDogLab v7 - Modo Coleta pH\n");
+    printf("  BitDogLab v7 - Modo Varredura / pH\n");
     printf("========================================\n\n");
 
     // --- Inicializa I2C1 ---
@@ -321,8 +494,6 @@ int main() {
     gpio_set_function(I2C_SCL_PIN, GPIO_FUNC_I2C);
     gpio_pull_up(I2C_SDA_PIN);
     gpio_pull_up(I2C_SCL_PIN);
-    printf("[I2C] SDA=GPIO%d, SCL=GPIO%d, %d kHz\n\n",
-           I2C_SDA_PIN, I2C_SCL_PIN, I2C_BAUDRATE / 1000);
 
     // --- Inicializa botões ---
     gpio_init(BTN_A_PIN);
@@ -332,76 +503,33 @@ int main() {
     gpio_init(BTN_B_PIN);
     gpio_set_dir(BTN_B_PIN, GPIO_IN);
     gpio_pull_up(BTN_B_PIN);
-    printf("[Botoes] A=GPIO%d, B=GPIO%d\n\n", BTN_A_PIN, BTN_B_PIN);
-
-    // --- Scanner I2C ---
-    printf("[I2C] Escaneando barramento...\n");
-    int encontrados = 0;
-    for (uint8_t addr = 1; addr < 127; addr++) {
-        uint8_t dummy;
-        int ret = i2c_read_blocking(i2c1, addr, &dummy, 1, false);
-        if (ret >= 0) {
-            printf("  -> Dispositivo encontrado: 0x%02X\n", addr);
-            encontrados++;
-        }
-    }
-    printf("[I2C] Total: %d dispositivo(s)\n\n", encontrados);
 
     // --- Inicializa AS7341 ---
-    printf("[AS7341] Inicializando sensor...\n");
     if (!as7341_init(&sensor, i2c1, AS7341_I2CADDR_DEFAULT)) {
         printf("  ERRO: AS7341 nao encontrado no endereco 0x39!\n");
-        printf("  Verifique as conexoes I2C1:\n");
-        printf("    SDA -> GPIO %d\n", I2C_SDA_PIN);
-        printf("    SCL -> GPIO %d\n", I2C_SCL_PIN);
         while (1) tight_loop_contents();
     }
-    printf("  AS7341 detectado com sucesso!\n\n");
 
     // Configuração do sensor
     as7341_set_atime(&sensor, 100);
     as7341_set_astep(&sensor, 999);
     as7341_set_gain(&sensor, AS7341_GAIN_8X);
 
-    float tempo_ms = (100 + 1) * (999 + 1) * 2.78e-3f;
-    printf("[Config] ATIME=100, ASTEP=999, Ganho=8x\n");
-    printf("         Tempo de integracao ~= %.1f ms\n\n", tempo_ms);
+    // LED do sensor inicia desligado com corrente configurada
+    led_sensor_aplicar();
 
     // --- Inicializa matriz WS2812 ---
-    printf("[WS2812] Inicializando matriz 5x5 (GPIO%d)...\n", WS2812_PIN);
     ws2812_init();
-    printf("  Matriz inicializada!\n\n");
-
-    // Acende os 9 LEDs centrais com a primeira cor
     set_center_color(paleta[cor_atual].r, paleta[cor_atual].g, paleta[cor_atual].b);
 
-    // --- Instruções ---
-    printf("========================================\n");
-    printf("  MODO COLETA DE DADOS pH\n");
-    printf("========================================\n");
-    printf("  Botao A -> Muda a cor do LED\n");
-    printf("  Botao B -> Dispara medicao\n");
-    printf("\n");
-    printf("  Comandos serial:\n");
-    printf("    'a' = pH Acido\n");
-    printf("    'n' = pH Neutro\n");
-    printf("    'b' = pH Base\n");
-    printf("    'r' = Reset contador\n");
-    printf("    'h' = Ajuda\n");
-    printf("\n");
-    printf("  Tipo pH atual: %s\n", ph_nomes[ph_atual]);
-    printf("  Cor LED atual: %s\n", paleta[cor_atual].nome);
-    printf("========================================\n\n");
+    printf("# Sistema pronto. Digite 'v' para varredura ou 'h' para comandos.\n");
+    mostrar_status();
 
-    // Imprime cabeçalho CSV (para referência)
-    printf("CSV_HEADER,Num,Tipo_pH,LED_Cor,LED_R,LED_G,LED_B,F1_415nm,F2_445nm,F3_480nm,F4_515nm,F5_555nm,F6_590nm,F7_630nm,F8_680nm,Clear,NIR\n");
-
-    // --- Loop principal ---
+    // --- Loop principal unificado ---
     while (true) {
-        // Verifica comandos serial (tipo pH)
         verificar_serial();
 
-        // Botão A: muda a cor
+        // Botão A: muda a cor da matriz
         if (btn_pressed(BTN_A_PIN)) {
             cor_atual = (cor_atual + 1) % NUM_PALETA;
             set_center_color(paleta[cor_atual].r,
@@ -414,12 +542,12 @@ int main() {
                    paleta[cor_atual].b);
         }
 
-        // Botão B: leitura espectral
+        // Botão B: leitura espectral pontual
         if (btn_pressed(BTN_B_PIN)) {
             realizar_leitura();
         }
 
-        sleep_ms(10);  // Reduz uso de CPU
+        sleep_ms(10);
     }
 
     return 0;

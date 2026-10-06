@@ -1,0 +1,16 @@
+{
+  "data_hora": "2026-10-04T17:03:54",
+  "experimento": "varredura espectral",
+  "firmware": "a734x_test",
+  "porta": "COM8",
+  "rotulo": "vazio",
+  "matriz_ligada": true,
+  "led_as7341_mA": 20,
+  "sensor": {
+    "atime": 100,
+    "astep": 999,
+    "ganho": "8x"
+  },
+  "leituras_por_cor": 5,
+  "cores": 8
+}

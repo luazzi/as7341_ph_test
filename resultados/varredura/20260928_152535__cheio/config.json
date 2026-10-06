@@ -1,0 +1,7 @@
+{
+  "migrado": true,
+  "experimento": "varredura espectral",
+  "firmware": "a734x_test",
+  "rotulo": "cheio",
+  "obs": "migrado de data/experimentos"
+}

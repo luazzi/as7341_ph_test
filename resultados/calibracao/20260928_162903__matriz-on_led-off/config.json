@@ -1,0 +1,13 @@
+{
+  "migrado": true,
+  "experimento": "calibracao (caracterizacao optica)",
+  "firmware": "caracterizacao_optica",
+  "matriz_ligada": true,
+  "led_as7341_mA": 0,
+  "sensor": {
+    "atime": 100,
+    "astep": 999,
+    "ganho": "4x"
+  },
+  "obs": "migrado de data/calibracao; formato antigo sem colunas matriz/led_ma"
+}

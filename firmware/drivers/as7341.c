@@ -78,10 +78,10 @@ static bool as7341_enable_spectral_measurement(as7341_t *dev, bool enable) {
 /**
  * @brief Seleciona o banco de registradores (0 ou 1)
  *        Bank 0: registradores >= 0x80 (padrão)
- *        Bank 1: registradores SMUX (0x00-0x13)
+ *        Bank 1: registradores 0x60-0x74 (CONFIG, LED, etc.)
  */
 static bool as7341_set_register_bank(as7341_t *dev, bool bank1) {
-    // Bit 4 (REG_BANK) do CFG0 (0xA9): 0=banco padrão, 1=banco SMUX
+    // Bit 4 (REG_BANK) do CFG0 (0xA9): 0=banco padrão, 1=banco 0x60-0x74
     return as7341_modify_reg(dev, AS7341_CFG0, 0x10,
                              bank1 ? 0x10 : 0x00);
 }
@@ -308,12 +308,18 @@ bool as7341_read_all_channels(as7341_t *dev, uint16_t *readings) {
 }
 
 bool as7341_enable_led(as7341_t *dev, bool enable) {
+    // CONFIG (0x70) e LED (0x74) so sao acessiveis com REG_BANK = 1
+    if (!as7341_set_register_bank(dev, true)) return false;
+
     // Primeiro, habilita o controle de LED via CONFIG (0x70), bit 3 (LED_SEL)
-    if (!as7341_modify_reg(dev, AS7341_CONFIG, 0x08, enable ? 0x08 : 0x00))
-        return false;
+    bool ok = as7341_modify_reg(dev, AS7341_CONFIG, 0x08, enable ? 0x08 : 0x00);
 
     // Depois, liga/desliga o LED via registro LED (0x74), bit 7
-    return as7341_modify_reg(dev, AS7341_LED, 0x80, enable ? 0x80 : 0x00);
+    if (ok) ok = as7341_modify_reg(dev, AS7341_LED, 0x80, enable ? 0x80 : 0x00);
+
+    // Sempre retorna ao banco padrao (necessario para leituras espectrais)
+    if (!as7341_set_register_bank(dev, false)) return false;
+    return ok;
 }
 
 bool as7341_set_led_current(as7341_t *dev, uint16_t current_ma) {
@@ -324,6 +330,9 @@ bool as7341_set_led_current(as7341_t *dev, uint16_t current_ma) {
 
     uint8_t reg_val = (uint8_t)((current_ma - 4) / 2);
 
-    // Preserva bit 7 (LED on/off), escreve bits [6:0]
-    return as7341_modify_reg(dev, AS7341_LED, 0x7F, reg_val);
+    // Preserva bit 7 (LED on/off), escreve bits [6:0] (requer REG_BANK = 1)
+    if (!as7341_set_register_bank(dev, true)) return false;
+    bool ok = as7341_modify_reg(dev, AS7341_LED, 0x7F, reg_val);
+    if (!as7341_set_register_bank(dev, false)) return false;
+    return ok;
 }

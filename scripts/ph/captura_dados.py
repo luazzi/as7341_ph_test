@@ -26,6 +26,10 @@ import os
 import csv
 import msvcrt
 from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from comum import caminho_relativo, criar_pasta_execucao, salvar_config  # noqa: E402
 
 
 # ============================================================================
@@ -58,24 +62,26 @@ def encontrar_porta_pico():
 
 
 def main():
-    # Determina a porta serial
-    if len(sys.argv) > 1:
-        porta = sys.argv[1]
-    else:
+    # Uso: captura_dados.py [PORTA] [ROTULO]
+    porta = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1].upper().startswith("COM") else None
+    rotulo = next((a for a in sys.argv[1:] if not a.upper().startswith("COM")), "")
+    if not porta:
         porta = encontrar_porta_pico()
         if not porta:
             print("ERRO: Nenhuma porta serial encontrada!")
             sys.exit(1)
 
-    # Nome do arquivo CSV com timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    nome_csv = f"medicoes_ph_{timestamp}.csv"
+    # Cada execucao fica em resultados/ph/<data_hora>__<rotulo>/
+    pasta = criar_pasta_execucao("ph", [rotulo or "sem_rotulo"])
+    salvar_config(pasta, {"experimento": "ph", "firmware": "a734x_test",
+                          "porta": porta, "rotulo": rotulo})
+    nome_csv = pasta / "dados.csv"
 
     print("=" * 50)
     print("  Captura de Dados AS7341 - Teste pH")
     print("=" * 50)
     print(f"  Porta:   {porta}")
-    print(f"  Arquivo: {nome_csv}")
+    print(f"  Arquivo: {caminho_relativo(nome_csv)}")
     print()
     print("  Teclas (instantaneas, sem Enter):")
     print("    a = pH Acido")
@@ -156,7 +162,7 @@ def main():
         ser.close()
         print(f"\n{'=' * 50}")
         print(f"  Total de medicoes salvas: {medicoes}")
-        print(f"  Arquivo: {os.path.abspath(nome_csv)}")
+        print(f"  Arquivo: {caminho_relativo(nome_csv)}")
         print(f"{'=' * 50}")
 
 

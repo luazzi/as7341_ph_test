@@ -1,0 +1,16 @@
+{
+  "data_hora": "2026-10-04T16:37:16",
+  "experimento": "calibracao (caracterizacao optica)",
+  "firmware": "caracterizacao_optica",
+  "porta": "COM8",
+  "matriz_ligada": true,
+  "led_as7341_mA": 0,
+  "rotulo": "",
+  "sensor": {
+    "atime": 100,
+    "astep": 999,
+    "ganho": "4x"
+  },
+  "replicas_por_condicao": 5,
+  "condicoes": 41
+}

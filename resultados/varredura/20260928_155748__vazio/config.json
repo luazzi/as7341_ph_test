@@ -1,0 +1,7 @@
+{
+  "migrado": true,
+  "experimento": "varredura espectral",
+  "firmware": "a734x_test",
+  "rotulo": "vazio",
+  "obs": "migrado de data/experimentos/vazio.txt e data/varreduras/resultados_espectrais.csv (identicos)"
+}
